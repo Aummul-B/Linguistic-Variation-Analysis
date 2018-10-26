@@ -1,0 +1,687 @@
+\documentclass{article}
+
+\usepackage{graphicx} 
+\setkeys{Gin}{width=3in} 
+\usepackage{geometry}
+\geometry{verbose,tmargin=1in,bmargin=1in,lmargin=1in,rmargin=1in}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\setlength{\parskip}{\smallskipamount}
+\setlength{\parindent}{0pt}
+\usepackage{amsthm}
+\usepackage{amsmath}
+
+
+\begin{document}
+
+\bibliographystyle{plain}
+\SweaveOpts{concordance=TRUE}
+\SweaveOpts{width=6.5,height=4}
+
+
+
+
+\title{Lab 2 - Linguistic Survey, Stat 215A, Fall 2018}
+
+
+\author{Aummul Baneen Manasawala}
+
+\maketitle
+
+\section{Introduction}
+This report is divided into two parts. The first part deals with the redwood dataset that was collected by the macroscope experiment by Tolle et al. in the "A Macroscope in the Redwoods" paper \cite{tolle2005macroscope}. We would experiment with the parameters in kernel smoothers therein along with analysing the interplay between temperature and humidity at a given point of time of the day. In the second part we would do Linguistic survey.
+
+<<cache = TRUE, echo = FALSE, message=FALSE, warning=FALSE>>=
+
+# Sorry about the inconvinience of downloading packages to run the file
+
+#Loading the libraries required
+library(tidyverse)
+library(dummy)
+library(factoextra)
+#library(rgl)
+library(gridExtra)
+library(RCurl)
+library(scales)
+library(gpairs)
+library(cluster)
+
+
+#sourcing the functions to load and clean data from files
+source("R/load.R")
+source("R/clean.R")
+@
+
+
+<<load_data, cache = TRUE, echo = FALSE, message = FALSE, warning = FALSE>>=
+
+# loading the ling_location data
+ling_location <- loadLingLocationData(path = "/data")
+
+# loading the ling_data data
+ling_data <- loadLingData(path = "/data")
+
+# loading the questions and answers
+load("data/question_data.RData")
+
+#loading the redwood data
+redwood_data <- loadRedwoodData(path = "data/", source = c("all"))
+@
+
+
+
+<<cleaning, cache = TRUE, echo = FALSE, message = FALSE, warning = FALSE>>=
+
+#Let's clean it up..
+
+#cleaning the ling_data
+clean_ling_data <- cleanLingData(ling_data)
+
+#cleaning the ling_location data
+clean_ling_location <- cleanLingLocationData(ling_location)
+
+#cleaning the redwood dataframe
+
+clean_redwood_data_interim <- cleanRedwoodData(redwood_data)
+clean_redwood_data <- cleanRedwoodDataType(clean_redwood_data_interim)
+
+#Clean feels good!
+
+@
+
+
+<<Converting_Binary_dataset, echo = FALSE, eval=FALSE, warning=FALSE>>=
+
+#Converting to binary data frame
+ling_binary <- dummy(clean_ling_data[, (c(5:(ncol(ling_data)-2)))], p = "all")
+
+#This is all good, except we need to remove the columns that have the value of 0
+#We make a list of column numbers that have the answer value of 0
+zero_cols <- which(str_detect(colnames(ling_binary), "_0")==TRUE)
+
+#We remove those columns from our data set
+ling_binary <- subset(ling_binary, select = -zero_cols)
+
+
+#Re-adding the columns of city, state, ID, ZIPCODE, lat and longitude
+clean_ling_binary <- cbind(clean_ling_data$ID, clean_ling_data$CITY, clean_ling_data$STATE, clean_ling_data$ZIP, clean_ling_data$lat, clean_ling_data$long, ling_binary)
+@
+
+\section{Macroscope in the Redwood Data Analysis}
+We would do two types of analysis in this section. First, we would analyze the temperature distribution over the whole dataset and then we would follow it by trying to get insights of the changes in the temperature with respect to humidity at a given time of the day for all the nodes.
+
+\subsection{Temperature Distribution}
+We experiment with different kernels and bandwidth to estimate the true function of the temperature variation in the redwood at all days, nodes and time. The bandwidth of the kernel is a free parameter which exhibits a strong influence on the resulting estimate. To illustrate its effect,  we plot and compare different bandwidths as well as kernel shapes. We find that the red curve is undersmoothed since it contains too many spurious data artifacts arising from using a bandwidth of 0.02 which is too small. The green curve is oversmoothed since using the bandwidth h = 5 obscures much of the underlying structure. The blue curve with a bandwidth of h = 1 is considered to be optimally smoothed since its density estimate is close to the true density.
+
+\begin{figure}
+  \centering
+\begin{center}
+<<Plotting_kernel, fig=TRUE, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+
+#Gaussian Kernels
+G1 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 1/5, kernel = "gaussian", fill = "red", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( "Gaussian Kernel, Bandwidth : 0.2") + theme_bw()
+
+G2 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 1, kernel = "gaussian", fill = "blue", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( "Gaussian Kernel, Bandwidth : 1") + theme_bw()
+
+G3 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 5, kernel = "gaussian", fill = "green", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( "Gaussian Kernel, Bandwidth : 5") + theme_bw()
+
+
+#Rectangular Kernels
+R1 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 1/5, kernel = "rectangular", fill = "red", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( " Rectangular Kernel, Bandwidth : 0.2") + theme_bw()
+
+R2 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 1, kernel = "rectangular", fill = "blue", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( "Rectangular Kernel, Bandwidth : 1") + theme_bw()
+
+R3 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 5, kernel = "rectangular", fill = "green", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( "Rectangular Kernel, Bandwidth : 5") + theme_bw()
+
+
+#Epanechnikov Kernels
+E1 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 1/5, kernel = "epanechnikov", fill = "red", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( "Epanechnikov Kernel, Bandwidth : 0.2") + theme_bw()
+
+E2 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 1, kernel = "epanechnikov", fill = "blue", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( "Epanechnikov Kernel, Bandwidth : 1") + theme_bw()
+
+E3 <- ggplot(data = clean_redwood_data) + geom_density(aes(humid_temp), adjust = 5, kernel = "epanechnikov", fill = "green", alpha = 0.2) + xlab("Temperature in degree celcius") + ylab("Density") + ggtitle( "Epanechnikov Kernel, Bandwidth : 5") + theme_bw()
+
+
+grid.arrange(G1, G2, G3, R1, R2, R3, E1, E2, E3, ncol = 3)
+
+@
+  \caption{Density Estimate of the temperature in the Redwood with various kernel types and bandwidth}
+  \label{fig : kernel}
+\end{center}
+\end{figure}
+
+
+
+The kernel is the shape of the window function. Several types of kernel functions are commonly used: uniform, triangle, Epanechnikov, quartic (biweight), tricube, triweight, Gaussian, quadratic and cosine. We tried to compare the Gaussian, Rectangular, Epanechniko and Triangular. Since the Gaussian function has infinite support and is smooth, it results in the most smooth plots. However, the rectangular kernels have a very abrupt window. It either gives a uniform weight to all the points that are in the window or doesnot give any weight to points just outside the window. Thus, it results in a very horny density estimates as could be seen in the figure \ref{fig : kernel}.
+
+
+
+
+\subsection{Relationship between Humidity and Temperature}
+
+\begin{figure}
+  \centering
+\begin{center}
+<<loess_redwood, fig=TRUE, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+# We filter the readings at a given time period in our data
+
+redwood_fixed_time <- clean_redwood_data %>% filter(epoch %% 288 == 77)
+
+
+# We plot the loess smoother with various span
+plot(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp, cex = 0.7, pch = 19, col = alpha("black", 0.5), xlab = "Temperature in degree celcius", ylab = "Relative humidity in percentage")
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+span = 0.01, degree = 0), col = "red", lwd = 3)
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+span = 0.1, degree = 0), col = "blue", lwd = 3)
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+degree = 0), col = "green", lwd = 3)
+legend("topright", c("span=0.01", "span=0.08", "span=2/3 (default)"),
+fill = c("red", "blue", "green"), title = "window size")
+
+@
+  \caption{Variation in the loess smoother with changing window span}
+  \label{loess span}
+\end{center}
+\end{figure}
+
+
+We begin our analysis by first subsampling for the data which corresponds to a given point of time in the day. We study the relationship between temperature and humidity using this sample. In order to find out the function that defines their relationship, we choose to fit a loess smoother. The loess smoother function a span argument that tells us what percentage of points are used in predicting x
+(like bandwidth in density estimation in the previous section of this report). So there’s an idea of a window size; it’s just that within the window, we give more emphasis to points near the x value. We find the variations in the loess smoother line by variation in the span similar to the variation in the kernel density estimate by variation in the bandwidth. A larger window like the green loess smoother in fig  \ref{loess span}
+would be biased and would assume that all the points within the window follow the same function. We loose a lot of information about the variability in this case. On the other extreme, if we choose a window that is very narrow like the red loess smoother line in figure \ref{loess span}
+, out loess smoother line would cater to the temporary outliers as well and would be very jerky. The blue line would be the optimum in our case.
+
+
+We could also choose the function that we want to fit for the selected window. The function could be a polynomial of any degree. For the purpose of illustration, I chose to compare three functions with degree zero, one and two respectively. The first function draws a line which is the mean of all the values. The function with degree one would fit a linear regression line with all the points in the given window. Likewise, the function with degree of two would fit a quadratic regression curve for the points in the span and so on. The three case for our temperature and humidity graph is with loess smoothening function of degree zero, one and two could be compared in the figure \ref{loess degree}. 
+The graph with fits the mean assumes a constant relationship of the points in the window and if we extend the resultant loess curve, we find that it would not predict the humidity with increasing temperature very well. The rightmost curve in the figure \ref{loess degree} 
+with degree two fits a quadratic regression line for the points in the window and is overly sensitive to the variability. Thus, we see that there is a prominent bias-variance trade off in selecting the degree of the curve to be fitted in the loess function. As we increase the degree, we reduce the biased assumption of the data in the window following a low order relationship but we risk heavily increasing the variace that could negatively affect our predictions as it would cater to noise a lot.   
+
+
+\begin{figure}
+  \centering
+\begin{center}
+<<loess_degrees, fig=TRUE, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+par(mfrow = c(1, 3))
+plot(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp, cex = 0.7, pch = 19, col = alpha("black", 0.5), xlab = "Temperature in degree celcius", ylab = "Relative humidity in percentage", main = "Loess with Degree 0 (Mean)")
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+span = 0.01, degree = 0), col = "red", lwd = 3)
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+span = 0.1, degree = 0), col = "blue", lwd = 3)
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+degree = 0), col = "green", lwd = 3)
+legend("topright", c("span=0.01", "span=0.08", "span=2/3"),
+fill = c("red", "blue", "green"), title = "window size", cex = 0.7)
+
+
+plot(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp, cex = 0.7, pch = 19, col = alpha("black", 0.5), xlab = "Temperature in degree celcius", ylab = "Relative humidity in percentage", main = "Loess with Degree 1 (Linear Regression)")
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+span = 0.01, degree = 1), col = "red", lwd = 3)
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+span = 0.1, degree = 1), col = "blue", lwd = 3)
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+degree = 1), col = "green", lwd = 3)
+legend("topright", c("span=0.01", "span=0.08", "span=2/3"),
+fill = c("red", "blue", "green"), title = "window size", cex = 0.7)
+
+
+
+plot(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp, cex = 0.7, pch = 19, col = alpha("black", 0.5), xlab = "Temperature in degree celcius", ylab = "Relative humidity in percentage", main = "Loess with Degree 2 (Quadratic Regression)")
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+span = 0.01, degree = 2), col = "red", lwd = 3)
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+span = 0.1, degree = 2), col = "blue", lwd = 3)
+lines(loess.smooth(x = redwood_fixed_time$humidity, y = redwood_fixed_time$humid_temp,
+degree = 2), col = "green", lwd = 3)
+legend("topleft", c("span=0.01", "span=0.08", "span=2/3"),
+fill = c("red", "blue", "green"), title = "window size", cex = 0.7)
+@
+  \caption{Variation in the loess smoother with different degrees}
+  \label{loess degree}
+\end{center}
+\end{figure}
+
+
+
+\section{The Data}
+According to Nerbonne et al. in the paper "Introducing Computational Techniques in Dialectometry"
+%\cite{nerbonne2003introducing}, 
+individual linguistic features — words, constructions,  and  pronunciation  variants are associated only weakly with geography. Nerbonne and Kretzschmar (2003) focused  on  the  role  of computers in dialectometry and used the data from the linguistic survey to explain the language variation. Our data thus consist of questions and answers of people with respect to their location in the US.  
+
+\subsection{Data quality and cleaning}
+We find 4 percent of the data enteries in the individual linguistics data were NAs. We initially hoped to keep the rows and condition them to become functional. Since, if the entries were not entirely NAs, we could gather some information out of it. But we found that all those rows had the same profile of all the enteries as NAs and thus they were completely useless. If we would atleast have the latitude and longitude nformation of those rows, we would have substituted the NAs with the mean of the values of the nearby latitude and longitude regions. However, in the absence of any such data, we found it suitable to discard these rows from the analysis.
+
+\begin{figure}
+  \centering
+\begin{center}
+<<outliers, fig=TRUE, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+# Viewing the outliers
+states <- map_data("state")
+ling_data_outliers <- ggplot() + 
+  geom_polygon(data = states, aes(x = long, y = lat, group = group), fill = NA, color = "black", alpha = 0.5, size = 0.5) + 
+  coord_fixed(1.3) +
+  geom_point(aes(ling_data$long, ling_data$lat), alpha = 0.5, size = 0.5)
+
+
+# Outliers in ling_location data
+states <- map_data("state")
+ling_location_outliers <- ggplot() + 
+  geom_polygon(data = states, aes(x = long, y = lat, group = group), fill = NA, color = "black", alpha = 0.5, size = 0.5) + 
+  coord_fixed(1.3) +
+  geom_point(aes(ling_location$Longitude, ling_location$Latitude), size = 0.7)
+
+grid.arrange(ling_location_outliers, ling_data_outliers, ncol = 2)
+
+@
+  \caption{Outliers in the linguistic location data(left) and individual linguistic data(right)}
+  \label{outlier}
+\end{center}
+\end{figure}
+
+
+
+<<justify_removing_na, echo = FALSE, cache = TRUE, warning = FALSE, eval = FALSE>>=
+
+#Check whether any of the columns with NAs have some data inofrmation
+which(is.numeric(ling_data[which(is.na(ling_data)==TRUE), ]))
+
+#Number of columns with NA entries
+num_na_rows <- length(which(is.na(ling_data)==TRUE))
+
+#percentage rows that are not giving any information
+perc_na_rows <- num_na_rows*100/nrow(ling_data)
+perc_na_rows
+
+@
+
+We find that the data for some questions from question number 50 to 121 is missing. We acknowledge that we only have data for 67 questions as opposed to 72 that we expected. For the next step of data cleaning, we convert the data types of the option number selected for each question as factors to ease our analysis. Since this survey is for the United States of America, we also removed all the values that are outside the US. We can use this figure to see that some of the location latitude and longitude are wrongly mentioned which makes the data points fall outside the US in both the dataset the aggregared and individual as can be seen from figure \ref{outlier}. 
+
+\subsection{Exploratory Data Analysis}
+To get a better picture of the variations in the data, we start with narrowing down to two questions and delving deeper into those. We would investigate their relationship to each other and geography. The question that is personally very interesting to me is how people call their maternal and paternal grandfather. I don't have either of them now but I have good memories of them. In their honor and respect, I would like to explore the variations in the way these two prominent person in every one's life are being called. 
+
+The question number 71 is about what do you call your paternal grandfather. The 5 options were gramps, grandpa, grampa, pap and other. Sadly we would not be able to know how most people address their paternal grandpa because about 37.3\% people have voted for other. This mysterious and obscure names are generally used by the people in the southeast and the northeast. Most people in the midwest and west address use standard conventional "grandpa" and "grampa" and very few people less than 2\% use pap and gramps to call their paternal grandfathers.
+
+Comparatively, when we see the distribution of the names used for maternal grandfather, the seven possibilities are gramps, grandpa, grampa, grandad, pap, spell it as grandpa but pronounce it as grampa and other. Very similar to the case of the paternal grandfather, the maternal grandfathers are also mostly called by names that we could not gather by the survey as people chose the 'other' option. I wish our survey could account for those names, it would be interesting to find out the eccentric names people use to address their maternal grandfathers. These are the same maverick people of southeast and northeast USA that constitute 32\% of the total. Rest people spell it as grandpa but pronounce it as grampa or grandpa. They are also the ones mainly from midwest and western region.   
+
+In all, we can visually correlate from figure \ref{GF} 
+that the two questions are highly correlated. Answer from someone for one question very strongly predicts the anwer for the second. For example, if a person who address his paternal grandfather as grandpa would most likely also call his maternal grandfather as grandpa. In our case, the answer has also high geographical correlation. For example, if the person is from southeast it would be a fair prediction that he would not call his/her maternal as well as paternal grandfather as grandpa but with some other customized name. Likewise, a person from midwest is highly likely to address his grand father as grandpa. So, they are geographically related.
+
+\begin{figure}
+  \centering
+\begin{center}
+<<GF, fig=TRUE, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+
+states <- map_data("state")
+usa <- map_data("usa")
+blank_theme <- theme_bw() +
+  theme(plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) 
+
+
+
+# Making a plot for the paternal grandfather
+paternal_grandfather <- ling_data %>% 
+  filter(Q071 %in% c(2, 5), long > -125)
+# extract the answers to question 71
+answers_q71 <- all.ans[['71']]
+
+# Making the column to join on. 
+answers_q71$Q071 <- rownames(answers_q71)
+paternal_grandfather$Q071 <- as.character(paternal_grandfather$Q071)
+paternal_grandfather <- inner_join(paternal_grandfather, answers_q71, by = "Q071")
+
+# Plot!
+PG <- ggplot(paternal_grandfather) +
+  geom_polygon(data = usa, color = "black", aes(x = long, y = lat, group = group))+
+  geom_point(aes(x = long, y = lat, color = ans), 
+             size = 3, alpha = 0.1) +
+  scale_color_manual(labels = c("grandpa", "other"), values = c("blue", "red")) +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               data = states, colour = "grey", fill = NA) +
+  blank_theme
+
+
+
+
+
+
+# Making a plot for the maternal grandfather
+maternal_grandfather <- ling_data %>% 
+  filter(Q070 %in% c(6, 7), long > -125)
+# extract the answers to question 70
+answers_q70 <- all.ans[['70']]
+
+# Making the column to join on. 
+answers_q70$Q070 <- rownames(answers_q70)
+maternal_grandfather$Q070 <- as.character(maternal_grandfather$Q070)
+maternal_grandfather <- inner_join(maternal_grandfather, answers_q70, by = "Q070") 
+
+# Plot!
+MG <- ggplot(maternal_grandfather) +
+  geom_polygon(data = usa, color = "black", aes(x = long, y = lat, group = group)) +
+  geom_point(aes(x = long, y = lat, color = ans), 
+             size = 3, alpha = 0.1) +
+  scale_color_manual(labels = c("grandpa", "other"), values = c("blue", "red")) +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               data = states, colour = "grey", fill = NA) +
+  blank_theme
+
+
+#Plotting them together  
+grid.arrange(MG, PG, ncol = 2)
+
+@
+  \caption{Geographical responses to call maternal(left) and paternal(right) grandfathers respectively}
+  \label{GF}
+\end{center}
+\end{figure}
+
+The correlation between the answers to the above questions of calling maternal and paternal grandfather as the same was a bit obvious. To further bolster our findings and in order to explore more such correlations in the geographies as well as interdependencies in the questions, we considered two other interesting questions. The first one is what term people use for carbonated drinks. By plotting out the people on the graph of US, we found that north-eastern people generally call the carbonated drinks as "soda". The midwestern and western people use the term "pop" while the south eastern people address by the term "coke". Interestingly, when we changed the question to what people of US call a miniature lobster that is found in stream and lake, we found the people to be categorized with respect to same geographical buckets as in the question of carbonated drinks. The people in north east become a group that calls it "crayfish". Likewise people in midwest generally call it "crawdad" and the people of southeast call it "crawfish". We can visualize the strong geographical dependence as well as correlation between these two question which can help us predict the answer of one from the other in figure
+\ref{POP}.   
+
+\begin{figure}
+  \centering
+\begin{center}
+<<POP,fig=TRUE, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+
+states <- map_data("state")
+usa <- map_data("usa")
+blank_theme <- theme_bw() +
+  theme(plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) 
+
+
+# Make a plot for the carbonated drinks question.
+# You may want to join these data sets more efficiently than this.
+carbonated_drinks <- ling_data %>% 
+  filter(Q105 %in% c(1, 2, 3), long > -125)
+# extract the answers to question 50
+answers_q105 <- all.ans[['105']]
+
+# Make the column to join on.  They must be the same type.
+answers_q105$Q105 <- rownames(answers_q105)
+carbonated_drinks$Q105 <- as.character(carbonated_drinks$Q105)
+carbonated_drinks <- inner_join(carbonated_drinks, answers_q105, by = "Q105")
+
+# Plot!
+POP <- ggplot(carbonated_drinks) +
+  geom_point(aes(x = long, y = lat, color = ans), 
+             size = 3, alpha = 0.5) +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               data = states, colour = "black", fill = NA) +
+  blank_theme
+
+
+# Making a plot for the miniature lobster question
+fish <- ling_data %>% 
+  filter(Q066 %in% c(1,2,5), long > -125)
+# extract the answers to question 70
+answers_q066 <- all.ans[['66']]
+
+# Making the column to join on. 
+answers_q066$Q066 <- rownames(answers_q066)
+fish$Q066 <- as.character(fish$Q066)
+fish <- inner_join(fish, answers_q066, by = "Q066") 
+
+# Plot!
+FI <- ggplot(fish) +
+  geom_point(aes(x = long, y = lat, color = ans), 
+             size = 3, alpha = 0.5) +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               data = states, colour = "black", fill = NA) +
+  blank_theme
+
+
+#Plotting them together  
+grid.arrange(POP, FI, ncol = 2)
+
+@
+  \caption{Geographical responses to address carbonated drinks(left) and miniature lobsters(right)}
+  \label{POP}
+\end{center}
+\end{figure}
+
+
+\section{Dimension reduction methods}
+
+Because of the curse of dimentionality, we chose to project our data in lower dimensions before clustering for more efficient computation as well as better results by reorienting to the dimensions that explain the most variability in the data. We started with conditioning our data. Since each data point represents the number of people in the given block that answered a particular option of the question, we would like to replace the number by the percentage people that chose a particular answer. We do that in order to avoid catering to the answers of places where the number of people who responded to the survey was high. We don't need to normalize the columns because we are comparing similar scaled proportion of people who opted for an option in the survey.
+<<PCA, echo = FALSE, cache = TRUE, warning = FALSE>>=
+# Preparing the dataframe
+df <- clean_ling_location[, c(4:ncol(clean_ling_location))]
+
+#Averaging the data frame row-wise
+df_1 <- apply(as.matrix(df), 1, sum)
+
+for (i in c(1:nrow(df))) {
+  df[i, ] <- df[i, ]/df_1[i]
+}
+@
+
+Moving forward, in order to choose the number of dimensions to reduce, we analysed the scree plot and identified an elbow at dimension number 63  as shown in the figure \ref{fig : screeplot}. 
+The amount of variability explained by the dimensions higher than where the elbow is contributes very less to the overall variability. Therefore, we go with reducing our data in 63 dimensions which covers about 80\% of the total variability.
+
+
+
+
+<<pcacomp, echo = FALSE, warning = FALSE, message = FALSE>>=
+# performing PCA
+pca <- prcomp(df)
+
+
+# Calculate the amount of variability in the data.
+
+cum_var_pca <- data.frame(eigenvalue = as.numeric(pca$sdev^2),
+           component = c(1:length(pca$sdev))) %>% mutate(cum_prop_var = (cumsum(eigenvalue)*100)/ sum(eigenvalue))
+@
+
+
+\begin{figure}
+  \centering
+\begin{center}
+
+<<screeplot, fig=TRUE, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+#Plotting Variance
+plot(x = cum_var_pca$component, cum_var_pca$cum_prop_var, type = "b", cex = 0.5, main = "", xlab = "Number of Dimensions", ylab = "Variability Explained", lwd = 3, col = "blue")
+abline(v = 63, h = 80, lty = "dashed")
+@
+  \caption{Scree Plot for PCA}
+  \label{fig : screeplot}
+\end{center}
+\end{figure}
+
+
+
+<<PCA_df, echo = FALSE, cache = TRUE, warning = FALSE>>=
+#Getting the new dataframe from PCA
+reduded_df <- as.data.frame(pca$x)[ ,c(1:63)]
+
+#Adding the Latitude and Longitude information back to the data frame
+
+reduded_df_with_latlong <- as.data.frame(pca$x)[ ,c(1:63)]
+reduded_df_with_latlong$Longitude <- clean_ling_location$Longitude
+reduded_df_with_latlong$Latitude <- clean_ling_location$Latitude
+
+@
+
+
+\begin{figure}
+  \centering
+\begin{center}
+<<visualPC, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+#First PC
+df_for_visualization <- reduded_df_with_latlong[,c(1:6, 64, 65)] 
+gpairs(x = df_for_visualization[, c(1:6)], upper.pars = (list(scatter = 'points', col = "blue", fill = TRUE, alpha = 0.5)),lower.pars = list(scatter = "points"), scatter.pars = list(col = "black", alpha = 0.5, fill = "red"), gap = 0)
+@
+  \caption{Visualizing the data distribution in top 6 PCA components}
+  \label{PCA}
+\end{center}
+\end{figure}
+
+After getting the data in a reduced dimensions, we try to find some structure/categorization in the data. In order to do the division, we use the clustering technique of k means. In order to figure out the number of clusters in the data, we use a elbow curve. For our data, the elbow curve shown in the figure \ref{elbow_curve} gives a elbow at the number of clusters as 3. Therefore, we select 3 clusters to group our data.
+
+<<echo = FALSE, eval=FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth',fig.width=15, fig.height=17>>=
+# Determine number of clusters
+set.seed(7)
+gc()
+wss <- (nrow(reduded_df[, c(1:63)])-1)*sum(apply(reduded_df[, c(1:63)],2,var))
+for (i in 2:15) wss[i] <- sum(kmeans(reduded_df[, c(1:63)],
+                                     centers=i, iter.max=1000, nstart = 25)$withinss)
+@
+
+
+\begin{figure}
+  \centering
+\begin{center}
+<<elbowPlot, fig=TRUE, echo = FALSE, eval=FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth',fig.width=15, fig.height=17>>=
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+     ylab="Within groups sum of squares", col = "blue", lwd = 3)
+abline(v = 3, lty = "dashed", col = "red")
+@
+  \caption{Elbow curve for k means}
+  \label{elbow_curve}
+\end{center}
+\end{figure}
+
+
+After obtaining the 3 clusters in the data, we try to visualize the data in 2 dimensions of some of the prominent principal components. From figure \ref{clusters}, 
+we find that the clustering that we obtained through k means divide the data in a way that makes sense visually. In order to find out whether, this clustering and division is related to the geography, we plot the points on the US graph and colour them by the color in figure \ref{cluster map}. 
+Viola! the k means clustering divison is in complete consistency with the geographical divisions on which the answers of the previous questions divided the nation. The three k means group can be very cleanly used to divide the three main geographical regions of the US, namely : north easterm, south eastern and midwest including some areas of the west. There is a complete continuum except for some regions of the west which are not very populated and are a bit remote. Because of this, there are not many people from that region who participated in the survey. Therefore, there is a break in the continuum.
+
+The mathematical model behind this clustering was made of vectors that represented the percentage people n that small area that chose a certain option of a particular question. This makes sense for these clusters as each cluster is a set of points which is distinct to points in the other clusters in the basic characterization of the proportion of answers opted in the small region. The underlying dividing feature for these groups as we found from figure \ref{cluster map}
+is thus the geography. Using geography and correlation of one question to another, very thoughtlful and informed predictions can be made. 
+
+<<echo = FALSE, warning = FALSE, message=FALSE>>=
+#Applying k means
+set.seed(1234)
+clustered_df <- kmeans(reduded_df, centers = 3)
+
+
+#Adding the clusters obtained from k means to the data frame
+reduded_df_with_latlong_clusters <- reduded_df_with_latlong
+reduded_df_with_latlong_clusters$cluster <- clustered_df$cluster
+reduded_df_with_latlong_clusters$cluster <- as.factor(reduded_df_with_latlong_clusters$cluster)
+@
+
+
+
+
+\begin{figure}
+  \centering
+\begin{center}
+<<cluster_PC,fig=TRUE, echo = FALSE, warning = FALSE, message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+# plotting with cluster coloured
+V1 <- ggplot(data = reduded_df_with_latlong_clusters) + geom_point(aes(x = PC1, y = PC2, col = cluster))
+
+V2 <- ggplot(data = reduded_df_with_latlong_clusters) + geom_point(aes(x = PC1, y = PC3, col = cluster))
+
+V3 <- ggplot(data = reduded_df_with_latlong_clusters) + geom_point(aes(x = PC1, y = PC5, col = cluster))
+
+V4 <- ggplot(data = reduded_df_with_latlong_clusters) + geom_point(aes(x = PC1, y = PC4, col = cluster))
+
+grid.arrange(V1, V2, V3, V4,  nrow = 2)
+
+@
+  \caption{Viewing clustered data in some of the prominent dimensions obtained from PCA}
+  \label{clusters}
+\end{center}
+\end{figure}
+
+
+\begin{figure}
+  \centering
+\begin{center}
+<<clustermap, fig=TRUE, echo = FALSE, warning = FALSE,message=FALSE, out.width='1\\linewidth', fig.width=15, fig.height=17>>=
+reduded_df_with_latlong_clusters %>%
+  filter(Longitude > -125) %>%
+  ggplot() +
+  geom_tile(aes(x = Longitude, y = Latitude, 
+                color = cluster, fill = cluster)) +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               data = states, colour = "gray", fill = NA) +
+  theme_bw() +
+  theme(plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) 
+@
+  \caption{Visualizing k means clustered data on the US map}
+  \label{cluster map}
+\end{center}
+\end{figure}
+
+\section{Stability of findings to perturbation}
+Now, that we have got the data into nice three clusters that represent the three prominent regions of the US, we must question ourselves on whether our findings are stable enough to withstand the noise and perturbations or not. Stability is one of the most prominent feature that validates the correctness and applicability of our findings and results. Therefore, to check our stability, I would sample with replacement the data to change the starting points and test if the result of the interesting finding about the geographical dependencies and intercorrelation of the two questions still hold. We can see in the figure \ref{POP}
+that there is no change in the high level overall division of the regions based on the answers to the two questions after resampling. Thus, we can say that our finding is robust and stable. 
+<<fig=TRUE, echo=FALSE, message=FALSE, warning=FALSE>>=
+# Make a plot for the carbonated drinks question
+
+
+carbonated_drinks <- ling_data %>% 
+  filter(Q105 %in% c(1, 2, 3), long > -125)
+# extract the answers to question 50
+answers_q105 <- all.ans[['105']]
+
+
+# Make the column to join on.  They must be the same type.
+answers_q105$Q105 <- rownames(answers_q105)
+carbonated_drinks$Q105 <- as.character(carbonated_drinks$Q105)
+carbonated_drinks <- inner_join(carbonated_drinks, answers_q105, by = "Q105")
+
+#Sampling the data
+sample_index <- sample(c(1:nrow(carbonated_drinks)), size = nrow(carbonated_drinks), replace = T)
+carbonated_drinks_sampled <- carbonated_drinks[sample_index, ]
+
+
+# Plot!
+POP <- ggplot(carbonated_drinks_sampled) +
+  geom_point(aes(x = long, y = lat, color = ans), 
+             size = 3, alpha = 0.5) +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               data = states, colour = "black", fill = NA) +
+  blank_theme
+
+
+# Making a plot for the miniature lobster question
+fish <- ling_data %>% 
+  filter(Q066 %in% c(1,2,5), long > -125)
+# extract the answers to question 70
+answers_q066 <- all.ans[['66']]
+
+# Making the column to join on. 
+answers_q066$Q066 <- rownames(answers_q066)
+fish$Q066 <- as.character(fish$Q066)
+fish <- inner_join(fish, answers_q066, by = "Q066") 
+
+#Sampling the data
+sample_index_2 <- sample(c(1:nrow(fish)), size = nrow(fish), replace = T)
+fish_sampled <- fish[sample_index_2, ]
+
+
+
+# Plot!
+FI <- ggplot(fish_sampled) +
+  geom_point(aes(x = long, y = lat, color = ans), 
+             size = 3, alpha = 0.5) +
+  geom_polygon(aes(x = long, y = lat, group = group),
+               data = states, colour = "black", fill = NA) +
+  blank_theme
+
+
+#Plotting them together  
+grid.arrange(POP, FI, ncol = 2)
+
+@
+
+
+
+\section{Conclusion}
+We found that there is a strong correlation between the geographical location and the linguistic terms used by the poeple of the US. This hints towards the fact that due to physical proximity, humans tend to learn each others dialects. If there are more than one options the terms used by the most influencial people tend to become mainstream and dominate the vocabulary of the region. The regional dependency of vocabulary also hints towards collective mindset of the people who interact in trade, knowlege transfer and other activities of life. 
+
+
+
+
+\bibliography{lab2}
+\end{document}
